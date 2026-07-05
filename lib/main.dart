@@ -255,6 +255,7 @@ class Notif {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
@@ -422,82 +423,96 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _topBar() {
-    Widget tab(String label, int i) {
+    Widget tab(String shortLabel, String longLabel, int i, bool narrow) {
       final sel = _page == i;
-      return GestureDetector(
+      final inner = AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: EdgeInsets.symmetric(horizontal: narrow ? 8 : 16, vertical: 8),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: sel ? kCard : Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+          boxShadow: sel
+              ? [
+                  BoxShadow(
+                      color: Colors.black.withOpacity(0.06),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2))
+                ]
+              : null,
+        ),
+        child: Text(narrow ? shortLabel : longLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: sel ? kInk : kMuted)),
+      );
+      final tappable = GestureDetector(
         onTap: () => _pc.animateToPage(i,
             duration: const Duration(milliseconds: 300), curve: Curves.easeOut),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: sel ? kCard : Colors.transparent,
-            borderRadius: BorderRadius.circular(999),
-            boxShadow: sel
-                ? [
-                    BoxShadow(
-                        color: Colors.black.withOpacity(0.06),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2))
-                  ]
-                : null,
-          ),
-          child: Text(label,
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: sel ? kInk : kMuted)),
-        ),
+        child: inner,
       );
+      return narrow ? Expanded(child: tappable) : tappable;
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: const BoxDecoration(
         color: kCard,
         border: Border(bottom: BorderSide(color: kLine)),
       ),
-      child: Row(
-        children: [
-          const Text('İlaç Takvimi',
-              style: TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.5,
-                  color: kInk)),
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: kGridLine,
-              borderRadius: BorderRadius.circular(999),
+      child: LayoutBuilder(builder: (context, c) {
+        // Dar (dikey) ekranda baslik metnini gizle, sekmelere yer ac.
+        final narrow = c.maxWidth < 620;
+        return Row(
+          children: [
+            if (!narrow)
+              const Text('İlaç Takvimi',
+                  style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.5,
+                      color: kInk)),
+            if (!narrow) const Spacer(),
+            Expanded(
+              flex: narrow ? 1 : 0,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: kGridLine,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: narrow ? MainAxisSize.max : MainAxisSize.min,
+                  children: [
+                    tab('Çizelge', 'Günün Çizelgesi', 0, narrow),
+                    const SizedBox(width: 6),
+                    tab('İlaçlar', 'Kayıtlı İlaçlar', 1, narrow),
+                    const SizedBox(width: 6),
+                    tab('Ekle', 'Yeni İlaç Ekle', 2, narrow),
+                  ],
+                ),
+              ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                tab('Günün Çizelgesi', 0),
-                const SizedBox(width: 6),
-                tab('Kayıtlı İlaçlar', 1),
-                const SizedBox(width: 6),
-                tab('Yeni İlaç Ekle', 2),
-              ],
+            if (!narrow) const Spacer(),
+            IconButton(
+              tooltip: 'Bildirim izinleri',
+              onPressed: () async {
+                await Notif.requestPermissions();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Bildirim izinleri kontrol edildi'),
+                      behavior: SnackBarBehavior.floating));
+                }
+              },
+              icon:
+                  const Icon(Icons.notifications_active_outlined, color: kAccent),
             ),
-          ),
-          const Spacer(),
-          IconButton(
-            tooltip: 'Bildirim izinleri',
-            onPressed: () async {
-              await Notif.requestPermissions();
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Bildirim izinleri kontrol edildi'),
-                    behavior: SnackBarBehavior.floating));
-              }
-            },
-            icon: const Icon(Icons.notifications_active_outlined, color: kAccent),
-          ),
-        ],
-      ),
+          ],
+        );
+      }),
     );
   }
 
