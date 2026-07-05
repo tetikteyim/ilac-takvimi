@@ -205,6 +205,8 @@ class Notif {
       await _plugin.zonedSchedule(
         _idOf(m.id, iso, t), title, body, when, _details,
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
       );
     } catch (_) {
       // Kesin alarm izni verilmemişse yaklaşık zamanlı planla.
@@ -212,6 +214,8 @@ class Notif {
         await _plugin.zonedSchedule(
           _idOf(m.id, iso, t), title, body, when, _details,
           androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
         );
       } catch (_) {}
     }
