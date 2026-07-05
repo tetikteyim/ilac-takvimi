@@ -1,0 +1,74 @@
+name: APK Derle
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu al
+        uses: actions/checkout@v5
+
+      - name: Proje klasorunu bul
+        id: dir
+        run: |
+          if [ -f "lib/main.dart" ]; then
+            DIR="."
+          elif [ -f "ilac_takvimi/lib/main.dart" ]; then
+            DIR="ilac_takvimi"
+          else
+            FOUND=$(find . -maxdepth 4 -name "main.dart" -path "*/lib/*" -not -path "./.git/*" | head -1)
+            if [ -z "$FOUND" ]; then
+              echo "HATA: lib/main.dart bulunamadi. Depodaki dosyalar:"
+              find . -maxdepth 3 -not -path "./.git/*"
+              exit 1
+            fi
+            DIR=$(dirname "$(dirname "$FOUND")")
+          fi
+          echo "Proje klasoru: $DIR"
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Java kur
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Flutter kur
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: stable
+
+      - name: Android proje dosyalarini olustur
+        working-directory: ${{ steps.dir.outputs.dir }}
+        run: |
+          cp lib/main.dart /tmp/main.dart
+          cp pubspec.yaml /tmp/pubspec.yaml
+          flutter create . --project-name ilac_takvimi --org com.ilactakvimi --platforms android
+          cp /tmp/main.dart lib/main.dart
+          cp /tmp/pubspec.yaml pubspec.yaml
+
+      - name: Android ayarlarini yamala
+        working-directory: ${{ steps.dir.outputs.dir }}
+        run: python3 patch_android.py
+
+      - name: Bagimliliklari indir
+        working-directory: ${{ steps.dir.outputs.dir }}
+        run: flutter pub get
+
+      - name: APK derle
+        working-directory: ${{ steps.dir.outputs.dir }}
+        run: flutter build apk --release
+
+      - name: APK dosyasini yukle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ilac-takvimi-apk
+          path: ${{ steps.dir.outputs.dir }}/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Hata durumunda dosya listesi
+        if: failure()
+        run: find . -maxdepth 3 -not -path "./.git/*"
