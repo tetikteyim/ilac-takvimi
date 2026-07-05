@@ -42,13 +42,8 @@ def patch_manifest():
         s = s.replace("</application>", RECEIVERS + "    </application>", 1)
     # Uygulama adi
     s = re.sub(r'android:label="[^"]*"', 'android:label="İlaç Takvimi"', s, count=1)
-    # Yatay kilit (Dart tarafinda da kilitleniyor; manifest acilista garanti eder)
-    if "screenOrientation" not in s:
-        s = s.replace(
-            'android:name=".MainActivity"',
-            'android:name=".MainActivity"\n            android:screenOrientation="sensorLandscape"',
-            1,
-        )
+    # Yatay + dikey serbest: onceki surumlerdeki kilidi kaldir.
+    s = re.sub(r'\n\s*android:screenOrientation="[^"]*"', '', s)
     with io.open(MANIFEST, "w", encoding="utf-8") as f:
         f.write(s)
     print("Manifest yamalandi.")
