@@ -306,6 +306,7 @@ class _HomePageState extends State<HomePage> {
   Map<String, bool> taken = {};
   String selectedDate = toIso(DateTime.now());
   bool loaded = false;
+  Med? _editing; // Duzenlenmekte olan ilac (null ise yeni ekleme)
 
   @override
   void initState() {
@@ -323,20 +324,46 @@ class _HomePageState extends State<HomePage> {
     await Notif.requestPermissions();
   }
 
-  Future<void> addMed(Med m) async {
-    setState(() => meds.add(m));
+  Future<void> saveMed(Med m, {Med? replacing}) async {
+    setState(() {
+      if (replacing != null) {
+        final idx = meds.indexWhere((x) => x.id == replacing.id);
+        if (idx >= 0) {
+          meds[idx] = m;
+        } else {
+          meds.add(m);
+        }
+      } else {
+        meds.add(m);
+      }
+    });
+    if (replacing != null) {
+      // Eski dozlarin bildirimlerini iptal edip yenilerini kur.
+      await Notif.cancelMed(replacing);
+      // Duzenlemede eski isaretleri koru; sadece artik gecerli olmayanlari temizle.
+    }
     await Store.saveMeds(meds);
+    await Store.saveTaken(taken);
     await Notif.scheduleMed(m);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('${m.name.toUpperCase()} kaydedildi, hatırlatmalar kuruldu ✓'),
+        content: Text(replacing != null
+            ? '${m.name.toUpperCase()} güncellendi ✓'
+            : '${m.name.toUpperCase()} kaydedildi, hatırlatmalar kuruldu ✓'),
         backgroundColor: kAccent,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ));
+      _editing = null;
       _pc.animateToPage(0,
           duration: const Duration(milliseconds: 350), curve: Curves.easeOut);
     }
+  }
+
+  void startEdit(Med m) {
+    setState(() => _editing = m);
+    _pc.animateToPage(2,
+        duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
   }
 
   Future<void> deleteMed(Med m) async {
@@ -391,8 +418,23 @@ class _HomePageState extends State<HomePage> {
                     onSelectDate: (d) => setState(() => selectedDate = d),
                     onToggle: toggleDose,
                   ),
-                  MedsPage(meds: meds, onDelete: _confirmDelete),
-                  AddPage(onSave: addMed),
+                  MedsPage(
+                    key: ValueKey(meds.map((m) => m.id).join(',')),
+                    meds: meds,
+                    onDelete: _confirmDelete,
+                    onEdit: startEdit,
+                  ),
+                  AddPage(
+                    key: ValueKey(_editing?.id ?? 'new'),
+                    editing: _editing,
+                    onSave: saveMed,
+                    onCancelEdit: () {
+                      setState(() => _editing = null);
+                      _pc.animateToPage(1,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOut);
+                    },
+                  ),
                 ],
               ),
             ),
@@ -584,9 +626,16 @@ class SchedulePage extends StatelessWidget {
           children: [
             Row(
               children: [
-                Text(dateLabel,
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w800, color: kInk)),
+                Flexible(
+                  child: Text(dateLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: kInk)),
+                ),
+                const SizedBox(width: 8),
                 const Spacer(),
                 if (total > 0)
                   Container(
@@ -806,18 +855,16 @@ class SchedulePage extends StatelessWidget {
                     fontSize: 12, fontWeight: FontWeight.w600, color: kMuted)),
           ],
         );
-    return Row(
+    return Wrap(
+      spacing: 16,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         sw(kAc, kAcBorder, 'AÇ karnına'),
-        const SizedBox(width: 16),
         sw(kTok, kTokBorder, 'TOK karnına'),
-        const Spacer(),
-        const Flexible(
-          child: Text('💡 İlacı aldığınızda kutusuna dokunarak onaylayın',
-              style: TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w600, color: kAccent),
-              textAlign: TextAlign.right),
-        ),
+        const Text('💡 İlacı aldığınızda kutusuna dokunarak onaylayın',
+            style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600, color: kAccent)),
       ],
     );
   }
@@ -829,8 +876,14 @@ class SchedulePage extends StatelessWidget {
 class MedsPage extends StatelessWidget {
   final List<Med> meds;
   final Future<void> Function(Med) onDelete;
+  final void Function(Med) onEdit;
 
-  const MedsPage({super.key, required this.meds, required this.onDelete});
+  const MedsPage({
+    super.key,
+    required this.meds,
+    required this.onDelete,
+    required this.onEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -908,19 +961,42 @@ class MedsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          OutlinedButton(
-            onPressed: () => onDelete(m),
-            style: OutlinedButton.styleFrom(
-              backgroundColor: kDangerSoft,
-              foregroundColor: kDanger,
-              side: const BorderSide(color: kDangerSoftBorder),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              minimumSize: Size.zero,
-              shape:
-                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            child: const Text('Sil',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => onEdit(m),
+                icon: const Icon(Icons.edit_outlined, size: 15),
+                label: const Text('Düzenle',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: kAccentSoft,
+                  foregroundColor: kAccent,
+                  side: const BorderSide(color: kAccentSoftBorder),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  minimumSize: Size.zero,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: () => onDelete(m),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: kDangerSoft,
+                  foregroundColor: kDanger,
+                  side: const BorderSide(color: kDangerSoftBorder),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  minimumSize: Size.zero,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+                child: const Text('Sil',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+              ),
+            ],
           ),
         ],
       ),
@@ -932,21 +1008,48 @@ class MedsPage extends StatelessWidget {
 // Sayfa 3: Yeni İlaç Ekle
 // ---------------------------------------------------------------------------
 class AddPage extends StatefulWidget {
-  final Future<void> Function(Med) onSave;
-  const AddPage({super.key, required this.onSave});
+  final Med? editing;
+  final Future<void> Function(Med, {Med? replacing}) onSave;
+  final VoidCallback onCancelEdit;
+  const AddPage({
+    super.key,
+    required this.onSave,
+    required this.onCancelEdit,
+    this.editing,
+  });
 
   @override
   State<AddPage> createState() => _AddPageState();
 }
 
 class _AddPageState extends State<AddPage> {
-  final _name = TextEditingController();
-  final _days = TextEditingController(text: '7');
-  final _qty = TextEditingController(text: '1');
-  DateTime _start = DateTime.now();
-  String _stomach = 'ac';
+  late final TextEditingController _name;
+  late final TextEditingController _days;
+  late final TextEditingController _qty;
+  late DateTime _start;
+  late String _stomach;
   final Set<String> _times = {};
   final List<String> _customTimes = [];
+
+  bool get _isEdit => widget.editing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.editing;
+    _name = TextEditingController(text: e?.name ?? '');
+    _days = TextEditingController(text: (e?.days ?? 7).toString());
+    _qty = TextEditingController(text: (e?.qty ?? 1).toString());
+    _start = e != null ? fromIso(e.start) : DateTime.now();
+    _stomach = e?.stomach ?? 'ac';
+    if (e != null) {
+      _times.addAll(e.times);
+      for (final t in e.times) {
+        if (!kPresetTimes.contains(t)) _customTimes.add(t);
+      }
+      _customTimes.sort();
+    }
+  }
 
   @override
   void dispose() {
@@ -982,6 +1085,13 @@ class _AddPageState extends State<AddPage> {
     }
   }
 
+  void _removeCustomTime(String t) {
+    setState(() {
+      _times.remove(t);
+      _customTimes.remove(t);
+    });
+  }
+
   void _save() {
     final name = _name.text.trim();
     final days = int.tryParse(_days.text) ?? 0;
@@ -1004,7 +1114,8 @@ class _AddPageState extends State<AddPage> {
       return;
     }
     final med = Med(
-      id: DateTime.now().millisecondsSinceEpoch.toRadixString(36),
+      id: widget.editing?.id ??
+          DateTime.now().millisecondsSinceEpoch.toRadixString(36),
       name: name,
       start: toIso(_start),
       days: days,
@@ -1012,16 +1123,18 @@ class _AddPageState extends State<AddPage> {
       stomach: _stomach,
       times: _times.toList()..sort(),
     );
-    widget.onSave(med);
-    setState(() {
-      _name.clear();
-      _days.text = '7';
-      _qty.text = '1';
-      _times.clear();
-      _customTimes.clear();
-      _stomach = 'ac';
-      _start = DateTime.now();
-    });
+    widget.onSave(med, replacing: widget.editing);
+    if (!_isEdit) {
+      setState(() {
+        _name.clear();
+        _days.text = '7';
+        _qty.text = '1';
+        _times.clear();
+        _customTimes.clear();
+        _stomach = 'ac';
+        _start = DateTime.now();
+      });
+    }
   }
 
   InputDecoration _dec(String hint) => InputDecoration(
@@ -1053,196 +1166,251 @@ class _AddPageState extends State<AddPage> {
                 fontSize: 12, fontWeight: FontWeight.w700, color: kMuted)),
       );
 
-  @override
-  Widget build(BuildContext context) {
-    final allTimes = [...kPresetTimes, ..._customTimes]..sort();
+  Widget _fieldName() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _label('İlaç Adı'),
+          TextField(
+              controller: _name,
+              textCapitalization: TextCapitalization.characters,
+              decoration: _dec('Örn. Augmentin 1000mg')),
+        ],
+      );
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: _card(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _sectionTitle('Yeni İlaç Ekle'),
-            const SizedBox(height: 14),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _label('İlaç Adı'),
-                      TextField(
-                          controller: _name,
-                          textCapitalization: TextCapitalization.characters,
-                          decoration: _dec('Örn. Augmentin 1000mg')),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _label('Başlangıç Günü'),
-                      OutlinedButton(
-                        onPressed: _pickDate,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: kInk,
-                          backgroundColor: const Color(0xFFFCFDFE),
-                          side: const BorderSide(color: kLine),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 13),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                        ),
-                        child: Text(
-                            '${_start.day} ${kMonths[_start.month - 1]} ${_start.year}',
-                            style: const TextStyle(
-                                fontSize: 13, fontWeight: FontWeight.w600)),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _label('Kullanım Süresi (Gün)'),
-                      TextField(
-                          controller: _days,
-                          keyboardType: TextInputType.number,
-                          decoration: _dec('7')),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _label('Doz (Adet/Ölçek)'),
-                      TextField(
-                          controller: _qty,
-                          keyboardType: TextInputType.number,
-                          decoration: _dec('1')),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _label('Karın Durumu'),
-                    Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: kBg,
-                        border: Border.all(color: kLine),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _segBtn('AÇ karnına', 'ac', kAc, kAcInk),
-                          const SizedBox(width: 4),
-                          _segBtn('TOK karnına', 'tok', kTok, kTokInk),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(width: 20),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _label('Kullanım Saatleri'),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          ...allTimes.map((t) {
-                            final sel = _times.contains(t);
-                            return GestureDetector(
-                              onTap: () => setState(() =>
-                                  sel ? _times.remove(t) : _times.add(t)),
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 150),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 14, vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: sel ? kInk : kCard,
-                                  border: Border.all(
-                                      color: sel ? kInk : kLine),
-                                  borderRadius: BorderRadius.circular(999),
-                                  boxShadow: sel
-                                      ? [
-                                          BoxShadow(
-                                              color: kInk.withOpacity(0.2),
-                                              blurRadius: 6,
-                                              offset: const Offset(0, 2))
-                                        ]
-                                      : null,
-                                ),
-                                child: Text(t,
-                                    style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color:
-                                            sel ? Colors.white : kMuted)),
-                              ),
-                            );
-                          }),
-                          OutlinedButton(
-                            onPressed: _pickCustomTime,
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: kMuted,
-                              side: const BorderSide(color: kLine),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 7),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(999)),
-                            ),
-                            child: const Text('+ Saat Ekle',
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700)),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            FilledButton(
-              onPressed: _save,
-              style: FilledButton.styleFrom(
-                backgroundColor: kAccent,
+  Widget _fieldStart() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _label('Başlangıç Günü'),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: _pickDate,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: kInk,
+                backgroundColor: const Color(0xFFFCFDFE),
+                side: const BorderSide(color: kLine),
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10)),
-                elevation: 4,
-                shadowColor: kAccent.withOpacity(0.25),
               ),
-              child: const Text('İlacı Kaydet',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+              child: Text(
+                  '${_start.day} ${kMonths[_start.month - 1]} ${_start.year}',
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ],
+      );
+
+  Widget _fieldDays() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _label('Kullanım Süresi (Gün)'),
+          TextField(
+              controller: _days,
+              keyboardType: TextInputType.number,
+              decoration: _dec('7')),
+        ],
+      );
+
+  Widget _fieldQty() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _label('Doz (Adet/Ölçek)'),
+          TextField(
+              controller: _qty,
+              keyboardType: TextInputType.number,
+              decoration: _dec('1')),
+        ],
+      );
+
+  Widget _fieldStomach() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _label('Karın Durumu'),
+          Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: kBg,
+              border: Border.all(color: kLine),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _segBtn('AÇ karnına', 'ac', kAc, kAcInk),
+                const SizedBox(width: 4),
+                _segBtn('TOK karnına', 'tok', kTok, kTokInk),
+              ],
+            ),
+          ),
+        ],
+      );
+
+  Widget _fieldTimes() {
+    final allTimes = [...kPresetTimes, ..._customTimes].toSet().toList()..sort();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _label('Kullanım Saatleri'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ...allTimes.map((t) {
+              final sel = _times.contains(t);
+              final isCustom = !kPresetTimes.contains(t);
+              return GestureDetector(
+                onTap: () =>
+                    setState(() => sel ? _times.remove(t) : _times.add(t)),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: EdgeInsets.only(
+                      left: 14, right: isCustom ? 6 : 14, top: 8, bottom: 8),
+                  decoration: BoxDecoration(
+                    color: sel ? kInk : kCard,
+                    border: Border.all(color: sel ? kInk : kLine),
+                    borderRadius: BorderRadius.circular(999),
+                    boxShadow: sel
+                        ? [
+                            BoxShadow(
+                                color: kInk.withOpacity(0.2),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2))
+                          ]
+                        : null,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(t,
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: sel ? Colors.white : kMuted)),
+                      if (isCustom)
+                        GestureDetector(
+                          onTap: () => _removeCustomTime(t),
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 4),
+                            child: Icon(Icons.close,
+                                size: 15,
+                                color: sel ? Colors.white70 : kMuted),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+            OutlinedButton(
+              onPressed: _pickCustomTime,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: kMuted,
+                side: const BorderSide(color: kLine),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(999)),
+              ),
+              child: const Text('+ Saat Ekle',
+                  style:
+                      TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
             ),
           ],
         ),
-      ),
+      ],
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, c) {
+      final narrow = c.maxWidth < 620; // dikey / dar ekran
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: _card(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _sectionTitle(_isEdit ? 'İlacı Düzenle' : 'Yeni İlaç Ekle'),
+                  const Spacer(),
+                  if (_isEdit)
+                    TextButton(
+                      onPressed: widget.onCancelEdit,
+                      child: const Text('Vazgeç',
+                          style: TextStyle(
+                              color: kMuted, fontWeight: FontWeight.w700)),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              // --- Ust satir: ad / tarih / gun / doz ---
+              if (narrow) ...[
+                _fieldName(),
+                const SizedBox(height: 14),
+                Row(children: [
+                  Expanded(child: _fieldStart()),
+                  const SizedBox(width: 12),
+                  Expanded(child: _fieldDays()),
+                  const SizedBox(width: 12),
+                  Expanded(child: _fieldQty()),
+                ]),
+              ] else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 2, child: _fieldName()),
+                    const SizedBox(width: 14),
+                    Expanded(child: _fieldStart()),
+                    const SizedBox(width: 14),
+                    Expanded(child: _fieldDays()),
+                    const SizedBox(width: 14),
+                    Expanded(child: _fieldQty()),
+                  ],
+                ),
+              const SizedBox(height: 16),
+              // --- Karin durumu + saatler ---
+              if (narrow) ...[
+                _fieldStomach(),
+                const SizedBox(height: 16),
+                _fieldTimes(),
+              ] else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _fieldStomach(),
+                    const SizedBox(width: 20),
+                    Expanded(child: _fieldTimes()),
+                  ],
+                ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: narrow ? double.infinity : null,
+                child: FilledButton(
+                  onPressed: _save,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: kAccent,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    elevation: 4,
+                    shadowColor: kAccent.withOpacity(0.25),
+                  ),
+                  child: Text(_isEdit ? 'Değişiklikleri Kaydet' : 'İlacı Kaydet',
+                      style: const TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    });
   }
 
   Widget _segBtn(String label, String value, Color bg, Color fg) {
