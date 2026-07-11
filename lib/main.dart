@@ -692,7 +692,20 @@ class SchedulePage extends StatelessWidget {
               if (active.isEmpty)
                 _emptyBox('Bu gün için planlanmış ilaç yok.')
               else if (narrow)
-                _cardList(active)
+                // Dikey ekran: ayni tablo, ekran genisligine sigacak sekilde olceklenir.
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: kLine),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.topLeft,
+                    child: _grid(active, times, compact: true),
+                  ),
+                )
               else
                 Container(
                   decoration: BoxDecoration(
@@ -712,88 +725,6 @@ class SchedulePage extends StatelessWidget {
         ),
       );
     });
-  }
-
-  // Dikey ekran icin: her ilac bir kart, dozlar sarilabilir kutucuklar.
-  Widget _cardList(List<Med> active) {
-    Widget doseChip(Med m, String t) {
-      final key = doseKey(m.id, selectedDate, t);
-      final isTaken = taken[key] == true;
-      final isAc = m.stomach == 'ac';
-      final bg = isTaken ? kTakenGreen : (isAc ? kAc : kTok);
-      final fg = isTaken ? Colors.white : (isAc ? kAcInk : kTokInk);
-      final bd = isTaken
-          ? kTakenGreenDark
-          : (isAc ? kAcBorder : kTokBorder).withOpacity(0.4);
-      return InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: () => onToggle(m, selectedDate, t),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: bd),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(t,
-                  style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w800, color: fg)),
-              const SizedBox(width: 6),
-              Text(
-                (isAc ? 'AÇ' : 'TOK') + (m.qty > 1 ? ' ×${m.qty}' : ''),
-                style: TextStyle(
-                    fontSize: 11, fontWeight: FontWeight.w600, color: fg),
-              ),
-              if (isTaken)
-                const Padding(
-                  padding: EdgeInsets.only(left: 5),
-                  child: Text('✓',
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white)),
-                ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Column(
-      children: active.map((m) {
-        final sorted = [...m.times]..sort();
-        return Container(
-          width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFCFDFE),
-            border: Border.all(color: kLine),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(m.name.toUpperCase(),
-                  style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      color: kInk)),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: sorted.map((t) => doseChip(m, t)).toList(),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
-    );
   }
 
   Widget _dayTabs() {
@@ -850,16 +781,31 @@ class SchedulePage extends StatelessWidget {
     );
   }
 
-  Widget _grid(List<Med> active, List<String> times) {
+  Widget _grid(List<Med> active, List<String> times, {bool compact = false}) {
     const cellBorder = BorderSide(color: kGridLine, width: 1);
+    final nameW = compact ? 84.0 : 120.0;
+    final headH = compact ? 34.0 : 44.0;
+    final headFont = compact ? 12.0 : 13.0;
+    final nameFont = compact ? 11.0 : 13.0;
+    final doseFont = compact ? 11.0 : 12.0;
+    final cellPadH = compact ? 8.0 : 14.0;
+    final cellPadV = compact ? 8.0 : 12.0;
+    final chipPadH = compact ? 8.0 : 12.0;
+    final chipPadV = compact ? 5.0 : 6.0;
+    final chipMargin = compact ? 5.0 : 8.0;
+    final emptyW = compact ? 58.0 : 80.0;
+    final emptyH = compact ? 40.0 : 48.0;
 
     Widget header(String s) => Container(
           color: kBg,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          padding:
+              EdgeInsets.symmetric(horizontal: cellPadH, vertical: cellPadV),
           alignment: Alignment.center,
           child: Text(s,
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w800, color: kMuted)),
+              style: TextStyle(
+                  fontSize: headFont,
+                  fontWeight: FontWeight.w800,
+                  color: kMuted)),
         );
 
     return Table(
@@ -871,23 +817,23 @@ class SchedulePage extends StatelessWidget {
       defaultVerticalAlignment: TableCellVerticalAlignment.middle,
       children: [
         TableRow(children: [
-          Container(color: kBg, width: 120, height: 44),
+          Container(color: kBg, width: nameW, height: headH),
           ...times.map(header),
         ]),
         ...active.map((m) => TableRow(children: [
               Container(
                 color: const Color(0xFFFCFDFD),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: EdgeInsets.symmetric(
+                    horizontal: cellPadH, vertical: cellPadV),
                 child: Text(m.name.toUpperCase(),
-                    style: const TextStyle(
-                        fontSize: 13,
+                    style: TextStyle(
+                        fontSize: nameFont,
                         fontWeight: FontWeight.w800,
                         color: kInk)),
               ),
               ...times.map((t) {
                 if (!m.times.contains(t)) {
-                  return const SizedBox(width: 80, height: 48);
+                  return SizedBox(width: emptyW, height: emptyH);
                 }
                 final key = doseKey(m.id, selectedDate, t);
                 final isTaken = taken[key] == true;
@@ -898,14 +844,14 @@ class SchedulePage extends StatelessWidget {
                     ? kTakenGreenDark
                     : (isAc ? kAcBorder : kTokBorder).withOpacity(0.3);
                 return Padding(
-                  padding: const EdgeInsets.all(8),
+                  padding: EdgeInsets.all(chipMargin),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(8),
                     onTap: () => onToggle(m, selectedDate, t),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
+                      padding: EdgeInsets.symmetric(
+                          horizontal: chipPadH, vertical: chipPadV),
                       decoration: BoxDecoration(
                         color: bg,
                         borderRadius: BorderRadius.circular(8),
@@ -926,16 +872,16 @@ class SchedulePage extends StatelessWidget {
                             (isAc ? 'AÇ' : 'TOK') +
                                 (m.qty > 1 ? ' ×${m.qty}' : ''),
                             style: TextStyle(
-                                fontSize: 12,
+                                fontSize: doseFont,
                                 fontWeight: FontWeight.w700,
                                 color: fg),
                           ),
                           if (isTaken)
-                            const Padding(
-                              padding: EdgeInsets.only(left: 4),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 4),
                               child: Text('✓',
                                   style: TextStyle(
-                                      fontSize: 13,
+                                      fontSize: doseFont + 1,
                                       fontWeight: FontWeight.w800,
                                       color: Colors.white)),
                             ),
