@@ -307,6 +307,7 @@ class _HomePageState extends State<HomePage> {
   String selectedDate = toIso(DateTime.now());
   bool loaded = false;
   Med? _editing; // Duzenlenmekte olan ilac (null ise yeni ekleme)
+  int _formSession = 0; // Her duzenleme/kayit sonrasi formu tazelemek icin
 
   @override
   void initState() {
@@ -321,7 +322,9 @@ class _HomePageState extends State<HomePage> {
       taken = t;
       loaded = true;
     });
-    await Notif.requestPermissions();
+    try {
+      await Notif.requestPermissions();
+    } catch (_) {}
   }
 
   Future<void> saveMed(Med m, {Med? replacing}) async {
@@ -336,14 +339,17 @@ class _HomePageState extends State<HomePage> {
     } else {
       next.add(m);
     }
-    setState(() => meds = next);
-    if (replacing != null) {
-      // Eski dozlarin bildirimlerini iptal edip yenilerini kur.
-      await Notif.cancelMed(replacing);
-    }
-    await Store.saveMeds(meds); // once diske yaz
+
+    // 1) Once state + disk: bunlar her kosulda calismali.
+    setState(() {
+      meds = next;
+      _editing = null;
+      _formSession++;
+    });
+    await Store.saveMeds(meds);
     await Store.saveTaken(taken);
-    await Notif.scheduleMed(m);
+
+    // 2) Arayuz geri bildirimi ve sayfa gecisi.
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(replacing != null
@@ -353,20 +359,29 @@ class _HomePageState extends State<HomePage> {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ));
-      setState(() => _editing = null);
       _pc.animateToPage(0,
           duration: const Duration(milliseconds: 350), curve: Curves.easeOut);
     }
+
+    // 3) Bildirimler: hata verse bile kayit/arayuz etkilenmez.
+    try {
+      if (replacing != null) await Notif.cancelMed(replacing);
+      await Notif.scheduleMed(m);
+    } catch (_) {}
   }
 
   void startEdit(Med m) {
-    setState(() => _editing = m);
+    // Listeden en guncel kaydi al (ekrandaki eski kopya yerine).
+    final fresh = meds.firstWhere((x) => x.id == m.id, orElse: () => m);
+    setState(() {
+      _editing = fresh;
+      _formSession++;
+    });
     _pc.animateToPage(2,
         duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
   }
 
   Future<void> deleteMed(Med m) async {
-    await Notif.cancelMed(m);
     final next = List<Med>.from(meds)..removeWhere((x) => x.id == m.id);
     final nextTaken = Map<String, bool>.from(taken)
       ..removeWhere((k, _) => k.startsWith('${m.id}|'));
@@ -376,6 +391,9 @@ class _HomePageState extends State<HomePage> {
     });
     await Store.saveMeds(meds);
     await Store.saveTaken(taken);
+    try {
+      await Notif.cancelMed(m);
+    } catch (_) {}
   }
 
   Future<void> toggleDose(Med m, String iso, String t) async {
@@ -430,11 +448,14 @@ class _HomePageState extends State<HomePage> {
                     onEdit: startEdit,
                   ),
                   AddPage(
-                    key: ValueKey(_editing?.id ?? 'new'),
+                    key: ValueKey('form-$_formSession-${_editing?.id ?? 'new'}'),
                     editing: _editing,
                     onSave: saveMed,
                     onCancelEdit: () {
-                      setState(() => _editing = null);
+                      setState(() {
+                        _editing = null;
+                        _formSession++;
+                      });
                       _pc.animateToPage(1,
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.easeOut);
